@@ -8,13 +8,14 @@ from html import escape
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from ai.interpreter import interpret_mood, MoodProfile
 from ai.retriever import fetch_candidates, CandidateSong
-from ai.scorer import rank_candidates, ScoredSong
+from ai.scorer import rank_candidates, ScoredSong, score_candidate
+from audiodb import fetch_mostloved
 from ai.explainer import explain_recommendations
 from ai.enricher import enrich_candidates
 from ai.guardrails import validate_input
 from ai.logger import (
     log_run_start, log_validation_fail, log_profile,
-    log_retrieval, log_ranked, log_explanation, log_error,
+    log_retrieval, log_ranked, log_explanation, log_error, logger,
 )
 
 # ── Page Config ───────────────────────────────────────────────────────────────
@@ -334,6 +335,12 @@ html, body, [class*="css"] {
     border: 1px solid #1A1A24;
     border-radius: 10px;
 }
+.mw-ranked-row--rich { display: flex; align-items: center; gap: 12px; }
+.mw-thumb { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.mw-thumb-placeholder { width: 56px; height: 56px; border-radius: 6px; background: #1a1a1a; flex-shrink: 0; }
+.mw-theme-badge { font-size: 11px; background: #2a2a1a; color: #b8a96a; border-radius: 4px; padding: 2px 6px; margin-top: 4px; display: inline-block; }
+.mw-yt-link { font-size: 12px; color: #888; text-decoration: none; margin-top: 4px; display: inline-block; }
+.mw-yt-link:hover { color: #b8a96a; }
 .mw-rank-num {
     font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
@@ -621,13 +628,37 @@ def render_ranked_card(ranked: list[ScoredSong]):
     for i, s in enumerate(ranked, start=1):
         clean, debug = _split_reasons(s.reasons)
         clean_text = " · ".join(clean) if clean else "—"
+
+        thumb = s.candidate.adb_thumb_url
+        thumb_html = (
+            f'<img class="mw-thumb" src="{thumb}/small" alt="">'
+            if thumb and thumb.startswith("https://")
+            else '<div class="mw-thumb-placeholder"></div>'
+        )
+
+        theme = s.candidate.adb_theme
+        theme_html = (
+            f'<span class="mw-theme-badge">{escape(theme)}</span>'
+            if theme else ""
+        )
+
+        yt = s.candidate.adb_youtube_url
+        yt_html = (
+            f'<a class="mw-yt-link" href="{yt}" target="_blank" rel="noopener">▶ Watch</a>'
+            if yt and yt.startswith("https://www.youtube.com/")
+            else ""
+        )
+
         st.markdown(
-            f'<div class="mw-ranked-row">'
+            f'<div class="mw-ranked-row mw-ranked-row--rich">'
+            f'{thumb_html}'
             f'<div class="mw-rank-num">#{i}</div>'
             f'<div class="mw-ranked-info">'
             f'<div class="mw-ranked-title-text">{escape(s.candidate.title)}</div>'
             f'<div class="mw-ranked-artist">{escape(s.candidate.artist)}</div>'
             f'<div class="mw-ranked-reasons">{escape(clean_text)}</div>'
+            f'{theme_html}'
+            f'{yt_html}'
             f'</div>'
             f'<div class="mw-score-block">'
             f'<div class="mw-score-val">{s.score:.0f}</div>'
@@ -802,6 +833,26 @@ if (
             st.session_state.candidates,
             k=5,
         )
+        if len(ranked) < 5:
+            fallback_pool = fetch_mostloved()
+            existing_keys = {
+                (c.title.lower(), c.artist.lower())
+                for c in st.session_state.candidates
+            }
+            new_candidates = [
+                c for c in fallback_pool
+                if (c.title.lower(), c.artist.lower()) not in existing_keys
+            ]
+            fallback_scored = [
+                score_candidate(st.session_state.mood_profile, c)
+                for c in new_candidates
+            ]
+            merged = sorted(ranked + fallback_scored, key=lambda s: s.score, reverse=True)
+            ranked = merged[:5]
+            logger.info(
+                f"Fallback triggered: {len(new_candidates)} mostloved tracks added, "
+                f"mood={st.session_state.mood_profile.mood}"
+            )
         st.session_state.ranked = ranked
         st.session_state.ranked_for = st.session_state.fetched_for
         log_ranked(ranked)

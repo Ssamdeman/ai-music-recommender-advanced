@@ -17,7 +17,16 @@ Rules:
 - Do not open with "Here are your songs" or similar preamble — start mid-thought
 - Under 150 words total
 - Warm, unhurried tone — the reader should feel understood, not processed
+- When a song has a theme tag (e.g. [theme: In Love], [theme: Loss]), weave it into your
+  explanation naturally — connect the theme to what the person described
 """
+
+
+def _song_line(i: int, s: ScoredSong) -> str:
+    base = f'{i}. "{s.candidate.title}" by {s.candidate.artist}'
+    if s.candidate.adb_theme:
+        base += f' [theme: {s.candidate.adb_theme}]'
+    return base
 
 
 def explain_recommendations(
@@ -36,10 +45,7 @@ def explain_recommendations(
     if not ranked:
         return None, "No songs to explain."
 
-    song_list = "\n".join(
-        f'{i}. "{s.candidate.title}" by {s.candidate.artist}'
-        for i, s in enumerate(ranked, 1)
-    )
+    song_list = "\n".join(_song_line(i, s) for i, s in enumerate(ranked, 1))
 
     user_message = (
         f'The user said: "{user_text}"\n\n'

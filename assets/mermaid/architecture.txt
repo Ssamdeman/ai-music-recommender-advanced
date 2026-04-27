@@ -3,15 +3,20 @@ flowchart TD
 
     subgraph LLM ["🤖 LLM Agent — OpenRouter"]
         LLM_IN["Interpret Input\n(extract genre, mood, energy)"]
-        LLM_OUT["Explain Results\n(natural language response)"]
+        LLM_OUT["Explain Results\n(weaves in themes where present)"]
     end
 
     subgraph RAG ["🎵 MusicBrainz Retriever"]
         MB["Fetch real songs\nfrom live catalog"]
     end
 
+    subgraph ADB ["🎧 TheAudioDB Enricher"]
+        ADB_TRACK["Track lookup\n(MBID → text search → artist fallback)"]
+        ADB_POOL["Fallback pool\n(top tracks, genre-spanning artists)"]
+    end
+
     subgraph SCORE ["⚙️ Scoring Engine"]
-        SE["Re-rank retrieved songs\n(Module 3 logic)"]
+        SE["Score 0–100 using AudioDB signals\n(mood · genre · community score)"]
     end
 
     subgraph GUARD ["🛡️ Logger + Guardrails"]
@@ -20,12 +25,16 @@ flowchart TD
 
     User -->|"plain English input"| LLM_IN
     LLM_IN -->|"structured query\n(genre, mood, energy)"| MB
-    MB -->|"candidate songs"| SE
-    SE -->|"ranked results"| LLM_OUT
+    MB -->|"candidates + MBIDs"| ADB_TRACK
+    ADB_TRACK -->|"mood · genre · style · theme\ncover art · YouTube link"| SE
+    SE -->|"< 5 scored results"| ADB_POOL
+    ADB_POOL -->|"pad candidate list to 5"| SE
+    SE -->|"ranked top 5 + themes"| LLM_OUT
     LLM_OUT -->|"explained recommendations"| User
     User -->|"refine & loop again"| LLM_IN
 
     GUARD -. "silent throughout" .-> LLM_IN
     GUARD -. "silent throughout" .-> MB
+    GUARD -. "silent throughout" .-> ADB_TRACK
     GUARD -. "silent throughout" .-> SE
     GUARD -. "silent throughout" .-> LLM_OUT

@@ -1,6 +1,8 @@
 ﻿import time
 import requests
 
+from ai.retriever import CandidateSong
+
 _BASE_URL = "https://www.theaudiodb.com/api/v1/json/2"
 _TIMEOUT = 10
 
@@ -78,6 +80,82 @@ def lookup_by_mbid(mbid: str) -> dict | None:
         return None
 
     return _normalize(tracks[0])
+
+
+def lookup_artist_mood(artist: str) -> dict | None:
+    """
+    Artist-level fallback when track-level enrichment fails.
+    Returns genre/mood/style from the artist profile, or None on any failure.
+    """
+    if not artist:
+        return None
+
+    data = _get(f"{_BASE_URL}/search.php", params={"s": artist})
+    if not data:
+        return None
+
+    artists = data.get("artists") or []
+    if not artists:
+        return None
+
+    a = artists[0]
+    return {
+        "genre": a.get("strGenre") or None,
+        "mood":  a.get("strMood") or None,
+        "style": a.get("strStyle") or None,
+    }
+
+
+
+# Seed artists for the fallback pool — chosen to span common moods and genres.
+# mostloved.php returns 404 on the free tier; track-top10.php is the working equivalent.
+_FALLBACK_SEED_ARTISTS = [
+    "Coldplay", "Adele", "Arctic Monkeys", "Billie Eilish",
+    "Frank Ocean", "The Weeknd", "Radiohead", "Lana Del Rey",
+]
+
+
+def fetch_mostloved() -> list[CandidateSong]:
+    """
+    Build a fallback pool of pre-enriched CandidateSongs from track-top10 calls.
+
+    Note: mostloved.php returns 404 on the free tier. track-top10.php is the
+    working equivalent — same schema, same response fields. We seed from a
+    curated artist list to get genre and mood diversity across the pool.
+    Returns [] on any failure — never raises.
+    """
+    candidates: list[CandidateSong] = []
+    for artist in _FALLBACK_SEED_ARTISTS:
+        try:
+            data = _get(f"{_BASE_URL}/track-top10.php", params={"s": artist})
+            if not data:
+                continue
+            items = data.get("track") or []
+            for item in items:
+                try:
+                    enriched = _normalize(item)
+                    duration_raw = int(item.get("intDuration") or 0)
+                    candidates.append(CandidateSong(
+                        title=item.get("strTrack") or "",
+                        artist=item.get("strArtist") or "",
+                        mbid=item.get("strMusicBrainzID") or "",
+                        release=item.get("strAlbum") or "",
+                        duration_ms=duration_raw if duration_raw else None,
+                        tags=[],
+                        mb_score=0,
+                        adb_mood=enriched["mood"],
+                        adb_genre=enriched["genre"],
+                        adb_style=enriched["style"],
+                        adb_theme=enriched["theme"],
+                        adb_community_score=enriched["community_score"],
+                        adb_youtube_url=enriched["youtube_url"],
+                        adb_thumb_url=enriched["thumb_url"],
+                    ))
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return candidates
 
 
 def lookup_by_text(artist: str, title: str) -> dict | None:
