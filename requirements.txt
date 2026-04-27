@@ -1,3 +1,7 @@
 pandas
 pytest
 streamlit
+streamlit-lottie
+requests
+python-dotenv
+

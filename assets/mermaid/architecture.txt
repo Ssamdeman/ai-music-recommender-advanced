@@ -1,0 +1,31 @@
+flowchart TD
+    User(["👤 User\n(types mood or situation)"])
+
+    subgraph LLM ["🤖 LLM Agent — OpenRouter"]
+        LLM_IN["Interpret Input\n(extract genre, mood, energy)"]
+        LLM_OUT["Explain Results\n(natural language response)"]
+    end
+
+    subgraph RAG ["🎵 MusicBrainz Retriever"]
+        MB["Fetch real songs\nfrom live catalog"]
+    end
+
+    subgraph SCORE ["⚙️ Scoring Engine"]
+        SE["Re-rank retrieved songs\n(Module 3 logic)"]
+    end
+
+    subgraph GUARD ["🛡️ Logger + Guardrails"]
+        LG["Records everything\nCatches bad inputs & errors"]
+    end
+
+    User -->|"plain English input"| LLM_IN
+    LLM_IN -->|"structured query\n(genre, mood, energy)"| MB
+    MB -->|"candidate songs"| SE
+    SE -->|"ranked results"| LLM_OUT
+    LLM_OUT -->|"explained recommendations"| User
+    User -->|"refine & loop again"| LLM_IN
+
+    GUARD -. "silent throughout" .-> LLM_IN
+    GUARD -. "silent throughout" .-> MB
+    GUARD -. "silent throughout" .-> SE
+    GUARD -. "silent throughout" .-> LLM_OUT
