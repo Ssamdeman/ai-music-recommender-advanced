@@ -1,6 +1,7 @@
 import sys
 import os
 import requests
+from urllib.parse import quote_plus
 import streamlit as st
 import streamlit.components.v1 as components
 from html import escape
@@ -247,14 +248,7 @@ html, body, [class*="css"] {
     padding: 0.25rem 0.7rem;
     letter-spacing: 0.06em;
 }
-.mw-next-hint {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.6rem;
-    color: #2E2E3A;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    margin-top: 1.1rem;
-}
+
 
 /* ── Candidates list ── */
 .mw-candidates {
@@ -463,7 +457,7 @@ def render_animation():
 
 
 # ── Equalizer Loading Animation ───────────────────────────────────────────────
-def render_loading_animation(slot):
+def render_loading_animation(slot, label="Reading your vibe…"):
     html = """<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -515,7 +509,7 @@ def render_loading_animation(slot):
 
   const textEl = pdoc.createElement('div');
   textEl.className = 'vibe-text';
-  textEl.textContent = 'Reading your vibe…';
+  textEl.textContent = '__LABEL__';
   textEl.style.animation = 'mwVibePulse 2.5s ease-in-out infinite';
   overlay.appendChild(textEl);
 
@@ -544,7 +538,8 @@ def render_loading_animation(slot):
 })();
 </script>
 </body>
-</html>"""
+"""
+    html = html.replace("__LABEL__", label)
     with slot:
         components.html(html, height=1)
 
@@ -592,7 +587,6 @@ def render_profile_card(profile: MoodProfile):
             </div>
         </div>
         <div class="mw-keywords">{keywords_html}</div>
-        <div class="mw-next-hint">↳ Searching catalog — Chapter 3</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -643,11 +637,14 @@ def render_ranked_card(ranked: list[ScoredSong]):
         )
 
         yt = s.candidate.adb_youtube_url
-        yt_html = (
-            f'<a class="mw-yt-link" href="{yt}" target="_blank" rel="noopener">▶ Watch</a>'
-            if yt and yt.startswith("https://www.youtube.com/")
-            else ""
-        )
+        if yt and yt.startswith("https://www.youtube.com/"):
+            yt_html = f'<a class="mw-yt-link" href="{yt}" target="_blank" rel="noopener">▶ Watch</a>'
+        elif s.candidate.title:
+            query = quote_plus(f"{s.candidate.title} {s.candidate.artist}")
+            search_url = f"https://www.youtube.com/results?search_query={query}"
+            yt_html = f'<a class="mw-yt-link" href="{search_url}" target="_blank" rel="noopener">▶ Search</a>'
+        else:
+            yt_html = ""
 
         st.markdown(
             f'<div class="mw-ranked-row mw-ranked-row--rich">'
@@ -670,10 +667,7 @@ def render_ranked_card(ranked: list[ScoredSong]):
         if debug:
             with st.expander("Scoring details"):
                 st.caption(" · ".join(debug))
-    st.markdown(
-        '<div class="mw-next-hint">↳ AI explanation — Chapter 5</div>',
-        unsafe_allow_html=True,
-    )
+
 
 
 def render_explanation_card(text: str):
@@ -702,8 +696,7 @@ def render_candidates_card(candidates: list[CandidateSong]):
         '<div class="mw-candidates-title">Catalog results</div>'
         f'<div class="mw-count-badge">{len(candidates)} songs retrieved from MusicBrainz</div>'
         + "".join(rows)
-        + '<div class="mw-next-hint">↳ Scoring & ranking — Chapter 4</div>'
-        '</div>'
+        + '</div>'
     )
     st.markdown(html, unsafe_allow_html=True)
 
@@ -806,13 +799,15 @@ if (
     st.session_state.mood_profile
     and st.session_state.fetched_for != st.session_state.interpreted_for
 ):
-    with st.spinner("Searching the catalog..."):
-        songs, error = fetch_candidates(st.session_state.mood_profile, limit=25)
-        songs = enrich_candidates(songs)
-        st.session_state.candidates = songs
-        st.session_state.candidates_error = error
-        st.session_state.fetched_for = st.session_state.interpreted_for
-        log_retrieval(len(songs), error)
+    loading_slot2 = st.empty()
+    render_loading_animation(loading_slot2, label="Searching the catalog…")
+    songs, error = fetch_candidates(st.session_state.mood_profile, limit=25)
+    songs = enrich_candidates(songs)
+    loading_slot2.empty()
+    st.session_state.candidates = songs
+    st.session_state.candidates_error = error
+    st.session_state.fetched_for = st.session_state.interpreted_for
+    log_retrieval(len(songs), error)
 
 if st.session_state.candidates_error:
     st.warning(f"Catalog search: {st.session_state.candidates_error}")
@@ -827,35 +822,37 @@ if (
     and st.session_state.mood_profile
     and st.session_state.ranked_for != st.session_state.fetched_for
 ):
-    with st.spinner("Ranking your results..."):
-        ranked = rank_candidates(
-            st.session_state.mood_profile,
-            st.session_state.candidates,
-            k=5,
+    loading_slot3 = st.empty()
+    render_loading_animation(loading_slot3, label="Ranking your results…")
+    ranked = rank_candidates(
+        st.session_state.mood_profile,
+        st.session_state.candidates,
+        k=5,
+    )
+    if len(ranked) < 5:
+        fallback_pool = fetch_mostloved()
+        existing_keys = {
+            (c.title.lower(), c.artist.lower())
+            for c in st.session_state.candidates
+        }
+        new_candidates = [
+            c for c in fallback_pool
+            if (c.title.lower(), c.artist.lower()) not in existing_keys
+        ]
+        fallback_scored = [
+            score_candidate(st.session_state.mood_profile, c)
+            for c in new_candidates
+        ]
+        merged = sorted(ranked + fallback_scored, key=lambda s: s.score, reverse=True)
+        ranked = merged[:5]
+        logger.info(
+            f"Fallback triggered: {len(new_candidates)} mostloved tracks added, "
+            f"mood={st.session_state.mood_profile.mood}"
         )
-        if len(ranked) < 5:
-            fallback_pool = fetch_mostloved()
-            existing_keys = {
-                (c.title.lower(), c.artist.lower())
-                for c in st.session_state.candidates
-            }
-            new_candidates = [
-                c for c in fallback_pool
-                if (c.title.lower(), c.artist.lower()) not in existing_keys
-            ]
-            fallback_scored = [
-                score_candidate(st.session_state.mood_profile, c)
-                for c in new_candidates
-            ]
-            merged = sorted(ranked + fallback_scored, key=lambda s: s.score, reverse=True)
-            ranked = merged[:5]
-            logger.info(
-                f"Fallback triggered: {len(new_candidates)} mostloved tracks added, "
-                f"mood={st.session_state.mood_profile.mood}"
-            )
-        st.session_state.ranked = ranked
-        st.session_state.ranked_for = st.session_state.fetched_for
-        log_ranked(ranked)
+    loading_slot3.empty()
+    st.session_state.ranked = ranked
+    st.session_state.ranked_for = st.session_state.fetched_for
+    log_ranked(ranked)
 
 if st.session_state.ranked:
     render_ranked_card(st.session_state.ranked)
@@ -867,16 +864,18 @@ if (
     and st.session_state.mood_profile
     and st.session_state.explained_for != st.session_state.ranked_for
 ):
-    with st.spinner("Writing your explanation..."):
-        explanation, error = explain_recommendations(
-            st.session_state.submitted_mood,
-            st.session_state.mood_profile,
-            st.session_state.ranked,
-        )
-        st.session_state.explanation = explanation
-        st.session_state.explanation_error = error
-        st.session_state.explained_for = st.session_state.ranked_for
-        log_explanation(success=explanation is not None, error=error)
+    loading_slot4 = st.empty()
+    render_loading_animation(loading_slot4, label="Writing your explanation…")
+    explanation, error = explain_recommendations(
+        st.session_state.submitted_mood,
+        st.session_state.mood_profile,
+        st.session_state.ranked,
+    )
+    loading_slot4.empty()
+    st.session_state.explanation = explanation
+    st.session_state.explanation_error = error
+    st.session_state.explained_for = st.session_state.ranked_for
+    log_explanation(success=explanation is not None, error=error)
 
 if st.session_state.explanation_error:
     st.error(f"Explanation: {st.session_state.explanation_error}")

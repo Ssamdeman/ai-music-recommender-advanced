@@ -176,6 +176,12 @@ def lookup_by_text(artist: str, title: str) -> dict | None:
 
     tracks = data.get("track") or []
     if not tracks:
+        # existing artist+title attempt already returned nothing — try title only
+        data = _get(f"{_BASE_URL}/searchtrack.php", params={"t": title})
+        if data:
+            tracks = data.get("track") or []
+            if tracks:
+                return _normalize(tracks[0])
         return None
 
     return _normalize(tracks[0])

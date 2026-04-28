@@ -34,6 +34,49 @@ The pipeline has seven sequential stages with a cross-cutting logger active at e
 
 The logger runs silently alongside every stage, recording inputs, profile extractions, retrieval counts, ranked scores, and any errors.
 
+```mermaid
+flowchart TD
+    User(["👤 User\n(types mood or situation)"])
+
+    subgraph LLM ["🤖 LLM Agent — OpenRouter"]
+        LLM_IN["Interpret Input\n(extract genre, mood, energy)"]
+        LLM_OUT["Explain Results\n(weaves in themes where present)"]
+    end
+
+    subgraph RAG ["🎵 MusicBrainz Retriever"]
+        MB["Fetch real songs\nfrom live catalog"]
+    end
+
+    subgraph ADB ["🎧 TheAudioDB Enricher"]
+        ADB_TRACK["Track lookup\n(MBID → text search → artist fallback)"]
+        ADB_POOL["Fallback pool\n(top tracks, genre-spanning artists)"]
+    end
+
+    subgraph SCORE ["⚙️ Scoring Engine"]
+        SE["Score 0–100 using AudioDB signals\n(mood · genre · community score)"]
+    end
+
+    subgraph GUARD ["🛡️ Logger + Guardrails"]
+        LG["Records everything\nCatches bad inputs & errors"]
+    end
+
+    User -->|"plain English input"| LLM_IN
+    LLM_IN -->|"structured query\n(genre, mood, energy)"| MB
+    MB -->|"candidates + MBIDs"| ADB_TRACK
+    ADB_TRACK -->|"mood · genre · style · theme\ncover art · YouTube link"| SE
+    SE -->|"< 5 scored results"| ADB_POOL
+    ADB_POOL -->|"pad candidate list to 5"| SE
+    SE -->|"ranked top 5 + themes"| LLM_OUT
+    LLM_OUT -->|"explained recommendations"| User
+    User -->|"refine & loop again"| LLM_IN
+
+    GUARD -. "silent throughout" .-> LLM_IN
+    GUARD -. "silent throughout" .-> MB
+    GUARD -. "silent throughout" .-> ADB_TRACK
+    GUARD -. "silent throughout" .-> SE
+    GUARD -. "silent throughout" .-> LLM_OUT
+```
+
 ---
 
 ## Setup Instructions
@@ -68,6 +111,14 @@ The app opens at `http://localhost:8501`. No other services, accounts, or local 
 
 ---
 
+## Demo
+
+[![Watch the demo](https://cdn.loom.com/sessions/thumbnails/9ed3a98bfb924c6c83ec35b45a71dd35-47d0c89995ede8e0-full-play.gif)](https://www.loom.com/share/9ed3a98bfb924c6c83ec35b45a71dd35)
+
+The walkthrough covers three end-to-end examples: a mellow late-night input, an upbeat in-love input, and a guardrails rejection. Each shows the full pipeline — mood profile extraction, catalog retrieval, enrichment, scoring breakdown, and LLM explanation.
+
+---
+
 ## Design Decisions
 
 **MusicBrainz over Spotify** — The Spotify API requires OAuth app registration, per-user authorization flows, and scope approval for search. MusicBrainz is fully open, requires no authentication, and returns real track metadata via a simple REST call. For a project focused on the AI pipeline rather than streaming integration, eliminating the auth wall meant faster iteration and a simpler deployment story.
@@ -86,41 +137,30 @@ The app opens at `http://localhost:8501`. No other services, accounts, or local 
 
 ```
 
-Suggested format per interaction:
-
-Input 1:
-  "I just finished a long week and I'm winding down with a glass of wine
-   something mellow, warm, and a little melancholy."
+Input 1: "I just finished a long week and I'm winding down with a glass of wine something mellow, warm, and a little melancholy."
 
 Profile extracted:
-  genre: Indie  |  mood: melancholy  |  energy: 30%  |  valence: 60%
-  tempo: medium  |  acoustic: yes
-  keywords: Late night Wine Melancholy
+`genre: Indie | mood: melancholy | energy: 30% | valence: 60% | tempo: medium | acoustic: yes`
 
-Top (example):
-  #1  rush - Georga Raath feat. Mali Jo$e 54/100 : sound sample: https://www.youtube.com/watch?v=C4fgQykq_AE&list=RDC4fgQykq_AE&start_radio=1 
-  #2  ephemeros - axela 35/100
-  #3 bittersweet axela & JΔX 35/100
-LLM explanation:
-  "Rush" by Georga Raath and Mali Jo$e is a gentle, indie track that feels like a warm embrace after a long week, its mellow rhythm and soothing melodies perfect for a wine-soaked evening. "Ephemeros" by axela carries a serene, melancholic vibe—its warm tones and reflective lyrics seem to whisper of fleeting moments, matching your need for something wistful yet comforting. "Bittersweet" by axela and JΔX dives deeper into that tender melancholy with its emotional blend of indie and soul, evoking the gentle sadness that comes with winding down. "Soothsailor" by Goji, with its smooth, indie-pop sound, feels like a calming breeze, its warm, inviting melodies like an old friend's voice. Lastly, "10 PM" by the Japanese artists offers a soft, melodic indie tune that feels like a quiet night's lullaby, wrapping you in its gentle, melancholic warmth.
+Top results:
+- #1 rush — Georga Raath feat. Mali Jo$e · 54/100 · [▶ Watch](https://www.youtube.com/watch?v=C4fgQykq_AE)
+- #2 ephemeros — axela · 35/100
+- #3 bittersweet — axela & JΔX · 35/100
+
+LLM explanation: *"Rush" by Georga Raath and Mali Jo$e is a gentle, indie track that feels like a warm embrace after a long week, its mellow rhythm and soothing melodies perfect for a wine-soaked evening. "Ephemeros" by axela carries a serene, melancholic vibe — its warm tones and reflective lyrics seem to whisper of fleeting moments, matching your need for something wistful yet comforting...*
 
 
-Input 2:
-  "I met person and it making so happy. I think I am in love"
+Input 2: "I met someone and it's making me so happy. I think I am in love."
 
 Profile extracted:
-  genre: Indie  |  mood: melancholy  |  energy: 30%  |  valence: 60%
-  tempo: medium  |  acoustic: yes
-  keywords: Late night Wine Melancholy
+`genre: Pop | mood: happy | energy: 75% | valence: 90% | tempo: medium | acoustic: no`
 
-Top (example):
-  #1  rush - Georga Raath feat. Mali Jo$e 54/100 : sound sample: https://www.youtube.com/watch?v=C4fgQykq_AE&list=RDC4fgQykq_AE&start_radio=1 
-  #2  ephemeros - axela 35/100
-  #3 bittersweet axela & JΔX 35/100
-LLM explanation:
-  "Rush" by Georga Raath and Mali Jo$e is a gentle, indie track that feels like a warm embrace after a long week, its mellow rhythm and soothing melodies perfect for a wine-soaked evening. "Ephemeros" by axela carries a serene, melancholic vibe—its warm tones and reflective lyrics seem to whisper of fleeting moments, matching your need for something wistful yet comforting. "Bittersweet" by axela and JΔX dives deeper into that tender melancholy with its emotional blend of indie and soul, evoking the gentle sadness that comes with winding down. "Soothsailor" by Goji, with its smooth, indie-pop sound, feels like a calming breeze, its warm, inviting melodies like an old friend's voice. Lastly, "10 PM" by the Japanese artists offers a soft, melodic indie tune that feels like a quiet night's lullaby, wrapping you in its gentle, melancholic warmth.
+Top results: *(run the app to see live results — catalog output varies by session)*
 
 
+Input 3 — guardrails test:  "asdfghjkl"
+
+Result: Input rejected with message — *"That doesn't look like a mood description. Try something like: 'I need something upbeat for my morning run.'"* Pipeline never called.
 
 ```
 
@@ -135,6 +175,8 @@ LLM explanation:
 - Response time is slow on the free OpenRouter tier. Expected for a demo; not a logic problem.
 - Occasionally the LLM returns nothing or times out — error handling surfaces this as a readable message, never a traceback.
 - Biggest lesson: adding real metadata (AudioDB) improved ranking quality more than any prompt tuning did. The bottleneck shifted from the AI to data coverage.
+- Unit test suite added: 25/25 tests pass (pytest tests/). Three new test files cover the live Moodwave pipeline — scorer logic, input guardrails, and AudioDB normalization — with no network calls or mocking frameworks.
+- Test coverage spans score_candidate, _tag_matches, validate_input, and _normalize; edge cases include locked tracks, unenriched songs, keyboard mash, and the 100-pt score cap.
 ```
 
 ---
@@ -142,12 +184,12 @@ LLM explanation:
 ## Reflection
 
 ```
-Music taste is harder to capture than I expected. You think "sad and slow" is simple but the LLM has to guess what that means musically, then MusicBrainz has to have songs  tagged that way, then the scoring has to rank them right. Every step adds a chance to 
+Music taste is harder to capture than I expected. You think "sad and slow" is simple but the LLM has to guess what that means musically, then MusicBrainz has to have songs  tagged that way, then the scoring has to rank them right. Every step adds a chance to
 drift from what the user actually wanted.
 
 What surprised me most was how much the LLM felt like a component, not a chatbot.  You're not talking to it — you're running it like a function. That shift changed how I thought about prompts. Bad output meant bad instructions, not bad AI.
 
-Separating extraction from explanation was the right call. When something broke,  I knew exactly where — either the JSON came back wrong (extraction problem) or the 
+Separating extraction from explanation was the right call. When something broke,  I knew exactly where — either the JSON came back wrong (extraction problem) or the
 explanation was off (generation problem). Never had to guess which half failed.
 
 AI belongs in the fuzzy parts — interpreting human language, generating natural text. It doesn't belong in the ranking logic. That stays deterministic so you can trust it, test it, and debug it without asking the AI to explain itself.
@@ -156,18 +198,34 @@ AI belongs in the fuzzy parts — interpreting human language, generating natura
 
 ---
 
+## Reflection and Ethics
+
+**Limitations and biases**
+AudioDB coverage is uneven: Western, English-language, and mainstream artists are well-represented; regional, independent, and non-English artists frequently return null mood and genre fields, causing them to score lower regardless of actual fit. The fallback pool is seeded from 8 hand-picked artists, so when retrieval is thin, recommendations quietly bias toward those artists' styles. The community score bonus further favors established tracks over obscure ones. Mood vocabulary is another gap — the LLM might extract "melancholy" while AudioDB stores "Sad"; fuzzy matching narrows this but doesn't close it.
+
+**Could it be misused?**
+Music recommendation is low-stakes — no personal data is stored, no financial or health decisions are made. The main technical risk is prompt injection: user text flows directly into the LLM prompt, so a crafted input could attempt to override the system instructions. Mitigations already in place: input guardrails reject short or incoherent text before the LLM is called, and the structured JSON extraction format (asking for specific typed fields) makes it difficult for injected instructions to alter behavior meaningfully.
+
+**What surprised us during reliability testing**
+The `mostloved.php` endpoint was documented as available on the free tier but returned a 404 in production — the API documentation was wrong. The fallback had to be rebuilt around `track-top10.php` seeded from genre-spanning artists. The deeper surprise: enrichment rate (60–80% of candidates) turned out to be a hidden variable in output quality. Two runs with the same input could return different result quality depending on which MusicBrainz candidates happened to have AudioDB entries.
+
+**Collaboration with AI**
+This project was built in close collaboration with AI coding assistants. One genuinely helpful suggestion: when upgrading the scoring engine to use AudioDB mood data, the AI proposed passing `[song.adb_mood]` as a single-item list into the existing `_tag_matches` function rather than writing new comparison logic — reusing a tested function instead of duplicating it. One flawed suggestion: the AI implemented the `mostloved.php` fallback endpoint exactly as the API documentation described, but the endpoint was actually paywalled on the free tier. Neither the AI nor the documentation flagged this; it only surfaced during a live run. The fix (pivoting to `track-top10.php` with seed artists) came from the AI adapting in response to the failure, not from catching it in advance.
+
+---
+
 ## Tech Stack
 
-| Layer | Tool |
-|---|---|
-| UI | Streamlit |
-| LLM API | OpenRouter (model-agnostic) |
-| Music catalog (search) | MusicBrainz REST API |
-| Music metadata         | TheAudioDB REST API  |
-| Language | Python 3.11+ |
-| Animation | streamlit-lottie / CSS keyframe fallback |
-| HTTP | requests |
-| Config | python-dotenv |
+| Layer                  | Tool                                     |
+| ---------------------- | ---------------------------------------- |
+| UI                     | Streamlit                                |
+| LLM API                | OpenRouter (model-agnostic)              |
+| Music catalog (search) | MusicBrainz REST API                     |
+| Music metadata         | TheAudioDB REST API                      |
+| Language               | Python 3.11+                             |
+| Animation              | streamlit-lottie / CSS keyframe fallback |
+| HTTP                   | requests                                 |
+| Config                 | python-dotenv                            |
 
 ---
 

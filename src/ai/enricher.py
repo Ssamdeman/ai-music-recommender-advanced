@@ -26,6 +26,7 @@ def enrich_candidates(candidates: list[CandidateSong]) -> list[CandidateSong]:
             song.adb_thumb_url       = result["thumb_url"]
             enriched += 1
         if result is None:
+            logger.debug(f"AudioDB miss: '{song.title}' by '{song.artist}' (mbid={song.mbid!r})")
             artist_data = lookup_artist_mood(song.artist)
             if artist_data:
                 song.adb_genre = artist_data["genre"]

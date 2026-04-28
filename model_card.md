@@ -1,79 +1,48 @@
-# Model Card: Music Recommender Simulation
+# Model Card: Moodwave
 
-## 1. Model Name
+## Model Name
+Moodwave — AI Music Recommender
 
-> VibeMatch 1.0
+## Task
+Convert a plain-English mood description into 5 ranked song recommendations with a natural-language explanation, using a two-call LLM pipeline, live music catalog retrieval, and deterministic scoring.
 
----
+## System Components
+- **LLM (OpenRouter):** Two calls — one for structured MoodProfile extraction, one for explanation generation
+- **MusicBrainz:** Candidate retrieval (up to 25 tracks)
+- **TheAudioDB:** Enrichment — mood, genre, style, theme, cover art, YouTube links per track
+- **Scoring engine:** Deterministic, 0–100, weighted arithmetic — no LLM involvement
 
-## 2. Goal / Task
+## Data Sources
+No training data. At inference time: live MusicBrainz catalog (millions of recordings), TheAudioDB metadata (mood/genre per track), user's free-text input.
 
-VibeMatch tries to suggest the top 5 songs from a small catalog that best fit a listener's personal taste. It takes in a user's preferred genre, mood, energy, valence, and acoustic preference, scores every song, and spits out the best matches to show how rule-based scoring actually works in practice.
+## Strengths
+- Natural language input — no dropdowns or checkboxes
+- Real catalog — every recommendation is an actual song that exists
+- Transparent scoring — reasons shown in UI, reproducible across runs
+- Graceful degradation — unenriched candidates still score via MusicBrainz tags; fallback pool prevents empty results
 
----
+## Observed Biases and Limitations
+- AudioDB coverage is uneven — Western, English-language, mainstream artists are well-represented; regional, independent, and non-English artists frequently return null mood/genre fields and score lower regardless of actual fit
+- Fallback pool is seeded from 8 hand-picked artists, introducing implicit style bias when retrieval is thin
+- Community score bonus favors established tracks over obscure ones that might fit better emotionally
+- Mood vocabulary mismatch: LLM may extract "melancholy" while AudioDB stores "Sad" — fuzzy matching narrows but does not close this gap
+- No BPM, valence, or energy from the catalog — these come from LLM extraction, not measured audio features
 
-## 3. Algorithm Summary
+## Intended Use
+Music discovery and mood-based recommendation. Personal, casual, demo-grade. Not intended for production or commercial deployment.
 
-The system scores every song out of 100 by comparing its features to the user's preferences.
+## Misuse Considerations
+Low-stakes domain — no PII stored, no health or financial decisions. Main technical risk: user text flows directly into the LLM prompt, making prompt injection theoretically possible. Mitigations: input guardrails reject short/incoherent text before the LLM is called; structured JSON extraction format limits injection impact.
 
-- **Features considered:** It looks at energy, valence (mood), and acousticness. The closer a song's numbers are to the user's ideal, the higher the score.
-- **Weighting:** Energy carries the most weight, followed by valence and acousticness.
-- **Bonuses & rules:** It adds flat bonus points if the genre or mood matches exactly. Any song scoring under 40 is thrown out, and the system forces a little variety if the top two results are too similar.
+## Testing Results
+- 25/25 unit tests pass (`pytest tests/`) covering scorer logic, input guardrails, and AudioDB field normalization — no network calls required
+- Enrichment rate: 60–80% of candidates enriched per run; unenriched candidates score via sparse MusicBrainz tags
+- Fallback triggered correctly when candidate pool drops below 5
+- `mostloved.php` documented as free-tier but returned 404 in production — adapted to `track-top10.php` across genre-spanning seed artists
 
----
+## AI Collaboration
+This project was built in close collaboration with AI coding assistants throughout.
 
-## 4. Data Used
+**Helpful:** When upgrading the scoring engine to use AudioDB mood data, the AI proposed passing `[song.adb_mood]` as a single-item list into the existing `_tag_matches` function — reusing a tested fuzzy matcher instead of writing new comparison logic.
 
-- **Catalog size:** There are 18 songs in the dataset.
-- **Features tracked:** We track genre, mood, energy, valence, and acousticness. (Tempo and danceability are in the data but ignored).
-- **Diversity:** The data is heavily unbalanced. Lofi has three tracks, but most genres only have one. Completely missing genres like reggae or Latin means fans of those styles won't get good matches.
-
----
-
-## 5. Strengths
-
-- **Consistent Profiles:** It works really well for users with clear, aligned tastes. A high-energy pop fan gets exactly that at the #1 spot because the scoring dimensions reinforce each other.
-- **Transparency:** The system shows its math, explaining exactly which features contributed to a song's score.
-- **Variety:** The built-in diversity rule successfully stops the top results from being a wall of the exact same genre and mood.
-
----
-
-## 6. Observed Behavior / Biases
-
-- **Energy Dominance:** Because energy makes up 40% of the score, the system will sometimes push completely mismatched genres (like heavy metal for a "sad pop" fan) just because the energy numbers line up.
-- **Genre Skew & Strictness:** With only 18 songs, niche fans are out of luck. Also, genre matching is completely unforgiving—if you want "pop" and the song is "indie pop," you get zero bonus points.
-- **Binary Choices:** The "likes acoustic" preference is a simple yes/no, which penalizes users who might just want a _little_ bit of acoustic sound.
-
----
-
-## 7. Evaluation Process
-
-I tested six different user profiles ranging from standard (Chill Lofi) to weird edge cases (Conflicting Energy+Sad).
-
-- **Results:** Standard profiles worked as expected. The edge cases revealed big flaws—like recommending angry metal to a sad pop fan because the math technically matched.
-- **Testing Weights:** I also tried doubling the energy weight and halving the genre bonus. This broke the system entirely, causing a bunch of songs to hit a 100-point tie, proving energy was already too dominant.
-
----
-
-## 8. Intended Use and Non-Intended Use
-
-- **Intended use:** A classroom simulation built to explore how scoring rules and weights affect recommendations. It's meant to be read, tweaked, and tested.
-- **Not intended for:** It is _not_ a production app for real music discovery like Spotify. The 18-song catalog is too small, and the math is too simple to serve real-world taste diversity.
-
----
-
-## 9. Ideas for Improvement
-
-If I had more time, I would:
-
-- **Fix the Acoustic Flag:** Change the simple yes/no acoustic preference into a sliding scale so users can express nuanced tastes.
-- **Expand the Dataset:** Add at least 5 songs per genre to give niche listeners real options and reduce weird cross-genre results.
-- **Dynamic Weights:** Scale the genre bonus proportionally to the numeric weights so it doesn't get overpowered when tweaking the math.
-
----
-
-## 10. Personal Reflection
-
-- **What surprised me:** Seeing a heavy metal track rank #1 for a sad pop fan was a wake-up call. The math was perfectly correct, but the result was completely wrong. It showed me how an algorithm can be logically sound but practically useless if you don't think about what the numbers actually represent.
-- **AI Assistance:** AI tools were great for planning and spotting biases I missed (like the acoustic cliff), but I still had to cross-check everything against my actual Python code to ensure it was truthful.
-- **Takeaway:** It’s wild how a simple weighted math equation can feel like the system "understands" your taste when it works right. It definitely changes how I view the "magic" behind real apps like Spotify.
+**Flawed:** The AI implemented the `mostloved.php` fallback endpoint exactly as the API documentation described. The endpoint was actually paywalled on the free tier and returned 404 in production. Neither the AI nor the documentation flagged this ahead of time; it only surfaced during a live run.
