@@ -228,7 +228,3 @@ This project was built in close collaboration with AI coding assistants. One gen
 | Config                 | python-dotenv                            |
 
 ---
-
-## Future Improvements
-
-- **BPM / Valence / Energy** — TheAudioDB does not expose numeric audio features — no BPM, no valence, no energy level. These still come from the MoodProfile extraction rather than the track itself. AcousticBrainz was the open alternative but was shut down in 2022; Spotify's audio features API remains the only practical source, behind OAuth.

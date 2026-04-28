@@ -27,6 +27,7 @@ No training data. At inference time: live MusicBrainz catalog (millions of recor
 - Community score bonus favors established tracks over obscure ones that might fit better emotionally
 - Mood vocabulary mismatch: LLM may extract "melancholy" while AudioDB stores "Sad" — fuzzy matching narrows but does not close this gap
 - No BPM, valence, or energy from the catalog — these come from LLM extraction, not measured audio features
+- sometimes guidance failes but trying often works. since we are using 2 requests, if the first one failes, we can try again.
 
 ## Intended Use
 Music discovery and mood-based recommendation. Personal, casual, demo-grade. Not intended for production or commercial deployment.
